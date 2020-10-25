@@ -595,8 +595,20 @@ class Script {
 			if (handler !== undefined) handler(this);
 		}
 	}
+	reset() {
+		this.text = '';
+		this.stack.length = 0;
+		this.data = {};
+		this.identifier = 0;
+	}
+	eval(text) {
+		this.reset();
+		const tokens = parse(text);
+		this.run(tokens);
+		return this.text;
+	}
 }
 
 module.exports = {
-	Script, Plugin
+	Script, Plugin, parse
 };
