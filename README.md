@@ -6,7 +6,7 @@ Here's an example of a script instance made with Zyne. You can add plugins to it
 ```js
 // Dependencies for the language and plugins.
 const zyne = require('zyne');
-const rml = require('rml');
+const rml = require('zyne-rml');
 
 // Initialize a new script.
 const script = new zyne.Script();
@@ -23,7 +23,7 @@ const text = `
 font($size) -> {
 
 	// Assign the font size in pixels.
-	font-size: '\($size)px'
+	font-size: '\\($size)px'
 
 	// Set the font family to sans-serif.
 	font-family: sans-serif
@@ -54,8 +54,9 @@ h1 => {
 }
 `;
 
-// Generate an html result from the source text.
-const html = script.eval(text);
+// Generate a JavaScript result from the source text and convert it to HTML.
+const js = script.eval(text);
+const html = eval(js);
 
 // Log the result to the console.
 console.log(html);
