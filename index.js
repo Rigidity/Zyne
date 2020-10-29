@@ -186,7 +186,7 @@ function parse(text) {
 			Rule('multiLineComment')
 		))),
 		directive: Wrap('directive',
-			/#(?:[a-zA-Z0-9_]+(?:-[a-zA-Z0-9_]+)*)/,
+			/#(?:[a-zA-Z_]+(?:-[a-zA-Z_]+)*)/,
 			Opt(
 				Rule('skip'),
 				Rule('arguments')
@@ -197,7 +197,7 @@ function parse(text) {
 			)
 		),
 		plugin: Wrap('plugin',
-			/@(?:[a-zA-Z0-9_]+(?:-[a-zA-Z0-9_]+)*)/,
+			/@(?:[a-zA-Z_]+(?:-[a-zA-Z_]+)*)/,
 			Opt(
 				Rule('skip'),
 				Rule('block')
@@ -374,13 +374,13 @@ function parse(text) {
 			Rule('variable'),
 			Rule('string'),
 			Rule('identifier'),
-			Rule('list'),
-			Rule('regex'),
 			And(
 				Hide(/\b/),
 				Rule('number'),
 				Hide(/\b/)
 			),
+			Rule('list'),
+			Rule('regex'),
 			Rule('color'),
 			Rule('empty'),
 			Rule('code')
