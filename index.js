@@ -422,13 +422,14 @@ class Plugin {
 
 let id = 0;
 
-function runFile(file = path.join(process.cwd(), 'index.zyn'), plugins = {}, files = {}, setup = true, context) {
-	return runString(fs.readFileSync(file, 'utf-8'), plugins, file, files, setup, context);
+function runFile(file = path.join(process.cwd(), 'index.zyn'), plugins = {}, setup = true, context, stack) {
+	if (!path.extname(file).length) file += '.zyn';
+	return runString(fs.readFileSync(path.resolve(file), 'utf-8'), plugins, file, setup, context, stack);
 }
-function runString(source = '', plugins = {}, file = path.join(process.cwd(), 'index.zyn'), files = {}, setup = true, ctx) {
+function runString(source = '', plugins = {}, file = path.join(process.cwd(), 'index.zyn'), setup = true, ctx, list) {
 	let text = '';
 	const context = ctx ?? (item => item === undefined ? `_zyne_${id++}` : text += `${item}\n`);
-	const stack = [
+	const stack = list ?? [
 		new Plugin()
 			.on('string', (script, text) => text)
 			.on('number', (script, text) => text)
@@ -443,16 +444,10 @@ function runString(source = '', plugins = {}, file = path.join(process.cwd(), 'i
 			.set('exit', (script, [code]) => `process.exit(${code})`)
 			.set('use', (script, [target]) => {
 				target = eval(target);
-				if (!path.extname(target).length) target += '.zyn';
 				if (!path.isAbsolute(target)) {
 					target = path.join(path.dirname(file), target);
 				}
-				target = path.resolve(target);
-				if (files[target] === undefined) {
-					files[target] = '';
-					files[target] = runFile(target, plugins, files, false, context);
-				}
-				return files[target];
+				return runFile(target, plugins, false, context, stack);
 			})
 	];
 	const tokens = parse(source);
@@ -463,11 +458,11 @@ function runString(source = '', plugins = {}, file = path.join(process.cwd(), 'i
 		}
 	}
 	tokens.forEach(token => context(walk(token, true)));
-	while (stack.length) {
-		const handler = stack.pop().handler('stop');
-		if (handler !== undefined) handler(context);
-	}
 	if (setup) {
+		while (stack.length) {
+			const handler = stack.pop().handler('stop');
+			if (handler !== undefined) handler(context);
+		}
 		for (const plugin of Object.values(plugins)) {
 			const handler = plugin.handler('exit');
 			if (handler !== undefined) handler(context);
