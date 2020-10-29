@@ -363,6 +363,7 @@ function parse(text) {
 			Hide(':]')
 		),
 		item: Or(
+			Rule('color'),
 			Rule('plugin'),
 			Rule('directive'),
 			Rule('element'),
@@ -381,7 +382,6 @@ function parse(text) {
 			),
 			Rule('list'),
 			Rule('regex'),
-			Rule('color'),
 			Rule('empty'),
 			Rule('code')
 		),
