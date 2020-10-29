@@ -8,12 +8,6 @@ Here's an example of a script instance made with Zyne. You can add plugins to it
 const zyne = require('zyne');
 const rml = require('zyne-rml');
 
-// Initialize a new script.
-const script = new zyne.Script();
-
-// Register the rml plugin on the script.
-script.register('rml', rml);
-
 // Some source code to transpile.
 const text = `
 // Use the rml plugin.
@@ -55,26 +49,16 @@ h1 => {
 `;
 
 // Generate a JavaScript result from the source text and convert it to HTML.
-const js = script.eval(text);
+const js = zyne.runString(text, {rml});
 const html = eval(js);
 
 // Log the result to the console.
 console.log(html);
 ```
 
-## Script Class
-The constructor is simply `new zyne.Script()`
-
-* `text = ''` The text that has been generated so far.  
-* `id()` Generates a new unique identifier for this script.  
-* `write(...text)` Writes a list of text to the script.  
-* `register(name, plugin)` Registers a plugin with a name.  
-* `unregister(name)` Unregisters a plugin by its name.  
-* `directive(name, ...args)` Triggers a directive by name.  
-* `trigger(name, ...data)` Triggers a handler by name.  
-* `run(tokens)` Runs a list of tokens on the script.  
-* `reset()` Resets the script to its original state except plugins.  
-* `eval(text)` Evaluates a bit of text on the script and returns the output.  
+## Execution Methods
+* `runFile(file, plugins)` Runs a Zyne file with a set of plugins.  
+* `runString(source, plugins, file)` Runs a Zyne script with a set of plugins and a path.  
 
 ## Plugin Class
 The constructor is simply `new zyne.Plugin()`

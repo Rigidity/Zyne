@@ -11,6 +11,8 @@ const {
 } = require('rigidparsing');
 
 const util = require('util');
+const path = require('path');
+const fs = require('fs');
 
 function parse(text) {
 	return run(text, {
@@ -418,45 +420,61 @@ class Plugin {
 	}
 }
 
-class Script {
-	constructor() {
-		this.plugins = {};
-		this.identifier = 0;
-		this.data = {};
-		this.stack = [];
-		this.text = '';
-	}
-	id() {
-		return '_zyne_' + (++this.identifier);
-	}
-	write(...text) {
-		text.forEach(item => {
-			if (typeof item == 'string' && item.length) {
-				this.text += item + '\n'
-			}
-		});
-	}
-	register(name, plugin) {
-		this.plugins[name] = plugin;
-	}
-	unregister(name) {
-		delete this.plugins[name];
-	}
-	directive(name, ...args) {
-		for (let i = this.stack.length - 1; i >= 0; --i) {
-			const res = this.stack[i].directive(name, ...args);
-			if (res !== undefined) return res;
+let id = 0;
+
+function runFile(file = path.join(process.cwd(), 'index.zyn'), plugins = {}, files = {}, setup = true, context) {
+	return runString(fs.readFileSync(file, 'utf-8'), plugins, file, files, setup, context);
+}
+function runString(source = '', plugins = {}, file = path.join(process.cwd(), 'index.zyn'), files = {}, setup = true, ctx) {
+	let text = '';
+	const context = ctx ?? (item => item === undefined ? `_zyne_${id++}` : text += `${item}\n`);
+	const stack = [
+		new Plugin()
+			.on('string', (script, text) => text)
+			.on('number', (script, text) => text)
+			.on('regex', (script, text) => text)
+			.on('color', (script, text) => `0x${text.slice(1)}`)
+			.on('list', (script, items) => `[${items.join(', ')}]`)
+			.on('code', (script, text) => text)
+			.on('identifier', (script, text) => `'${text}'`)
+			.on('boolean', (script, text) => text)
+			.set('log', (script, [text]) => `console.log(${text})`)
+			.set('error', (script, [text]) => `console.error(${text})`)
+			.set('exit', (script, [code]) => `process.exit(${code})`)
+			.set('use', (script, [target]) => {
+				target = eval(target);
+				if (!path.extname(target).length) target += '.zyn';
+				if (!path.isAbsolute(target)) {
+					target = path.join(path.dirname(file), target);
+				}
+				target = path.resolve(target);
+				if (files[target] === undefined) {
+					files[target] = '';
+					files[target] = runFile(target, plugins, files, false, context);
+				}
+				return files[target];
+			})
+	];
+	const tokens = parse(source);
+	if (setup) {
+		for (const plugin of Object.values(plugins)) {
+			const handler = plugin.handler('init');
+			if (handler !== undefined) handler(context);
 		}
-		throw new Error(`The directive "${name}" could not be found in this scope.`);
 	}
-	trigger(name, ...data) {
-		for (let i = this.stack.length - 1; i >= 0; --i) {
-			const res = this.stack[i].handler(name);
-			if (res !== undefined) return res(...data);
+	tokens.forEach(token => context(walk(token, true)));
+	while (stack.length) {
+		const handler = stack.pop().handler('stop');
+		if (handler !== undefined) handler(context);
+	}
+	if (setup) {
+		for (const plugin of Object.values(plugins)) {
+			const handler = plugin.handler('exit');
+			if (handler !== undefined) handler(context);
 		}
-		throw new Error(`The handler "${name}" could not be found in this scope.`);
 	}
-	walk({key, val, text}, block = false) {
+	return text;
+	function walk({key, val, text}, block = false) {
 		if (key == 'call') {
 			const name = val[0].val[0].text;
 			let params = [];
@@ -464,15 +482,15 @@ class Script {
 			for (let i = 1; i < val.length; i++) {
 				const item = val[i];
 				if (item.key == 'arguments') {
-					params = this.walk(item);
+					params = walk(item);
 				} else {
-					blocks.push(() => this.walk(item));
+					blocks.push(() => walk(item));
 				}
 			}
-			return this.trigger('call', this, name, params, blocks, block);
+			return trigger('call', context, name, params, blocks, block);
 		} else if (key == 'assignment') {
 			const name = val[0].val[0].text.slice(1);
-			return this.trigger('assignment', this, name, this.walk(val[1]), block);
+			return trigger('assignment', context, name, walk(val[1]), block);
 		} else if (key == 'define') {
 			const name = val[0].val[0].text;
 			let params;
@@ -485,130 +503,117 @@ class Script {
 			const blockList = [];
 			if (params !== undefined) params.val.forEach(param => paramList.push(param.val[0].text.slice(1)));
 			if (blocks !== undefined) blocks.val.forEach(block => blockList.push(block.val[0].text));
-			return this.trigger('define', this, name, paramList, blockList, () => this.walk(val[val.length - 1], true), block);
+			return trigger('define', context, name, paramList, blockList, () => walk(val[val.length - 1], true), block);
 		} else if (key == 'attribute') {
 			const name = val[0].val[0].text;
-			return this.trigger('attribute', this, name, this.walk(val[1]), block);
+			return trigger('attribute', context, name, walk(val[1]), block);
 		} else if (key == 'property') {
 			const name = val[0].val[0].text;
-			return this.trigger('property', this, name, this.walk(val[1]), block);
+			return trigger('property', context, name, walk(val[1]), block);
 		} else if (key == 'variable') {
 			const name = val[0].text.slice(1);
 			const indices = [];
 			for (let i = 1; i < val.length; i++) {
-				indices.push(this.walk(val[i]));
+				indices.push(walk(val[i]));
 			}
-			return this.trigger('variable', this, name, indices, block);
+			return trigger('variable', context, name, indices, block);
 		} else if (key == 'identifier') {
 			const name = val[0].text;
-			return this.trigger('identifier', this, name, block);
+			return trigger('identifier', context, name, block);
 		} else if (key == 'directive') {
 			const name = val[0].text.slice(1);
 			const args = [];
 			const blocks = [];
-			val[1].val.forEach(arg => {
-				if (arg.key == 'block') {
-					blocks.push(() => this.walk(arg));
+			for (let i = 1; i < val.length; i++) {
+				if (val[i].key == 'block') {
+					blocks.push(() => walk(val[i]));
 				} else {
-					args.push(this.walk(arg));
+					val[i].val.forEach(arg => args.push(walk(arg)));
 				}
-			});
-			return this.directive(name, this, args, blocks, block);
+			}
+			return directive(name, context, args, blocks, block);
 		} else if (key == 'block') {
-			val.forEach(token => this.write(this.walk(token, true)));
+			val.forEach(token => context(walk(token, true)));
 		} else if (key == 'plugin') {
 			const name = val[0].text.slice(1);
-			const plugin = this.plugins[name];
+			const plugin = plugins[name];
 			if (plugin === undefined) throw new Error(`Could not resolve the "${name}" plugin.`);
-			const parent = this.stack[this.stack.length - 1];
+			const parent = stack[stack.length - 1];
 			if (val.length > 1) {
-				this.stack.push(plugin);
+				stack.push(plugin);
 				const start = plugin.handler('start');
-				if (start !== undefined) start(this);
-				this.walk(val[1]);
+				if (start !== undefined) start(context);
+				walk(val[1]);
 				const stop = plugin.handler('stop');
-				if (stop !== undefined) stop(this);
-				this.stack.pop(plugin);
+				if (stop !== undefined) stop(context);
+				stack.pop(plugin);
 			} else {
-				if (this.stack.length) {
-					const old = this.stack[this.stack.length - 1];
+				if (stack.length > 1) {
+					const old = stack[stack.length - 1];
 					const stop = old.handler('stop');
-					if (stop !== undefined) stop(this);
-					this.stack.pop();
+					if (stop !== undefined) stop(context);
+					stack.pop();
 				}
-				this.stack.push(plugin);
+				stack.push(plugin);
 				const start = plugin.handler('start');
-				if (start !== undefined) start(this);
+				if (start !== undefined) start(context);
 			}
-			return parent?.handler?.('plugin')?.(this) ?? '';
+			return parent?.handler?.('plugin')?.(context) ?? '';
 		} else if (key == 'element') {
 			const name = val[0].val[0].text;
-			return this.trigger('element', this, name, () => this.walk(val[1], true), block);
+			return trigger('element', context, name, () => walk(val[1], true), block);
 		} else if (key == 'arguments') {
 			const items = [];
-			val.forEach(item => items.push(this.walk(item)));
+			val.forEach(item => items.push(walk(item)));
 			return items;
 		} else if (key == 'code') {
 			const text = val.map(item => item.text).join('');
-			return this.trigger('code', this, text, block);
+			return trigger('code', context, text, block);
 		} else if (key == 'list') {
 			const items = [];
-			val.forEach(item => items.push(this.walk(item)));
-			return this.trigger('list', this, items, block);
+			val.forEach(item => items.push(walk(item)));
+			return trigger('list', context, items, block);
 		} else if (key == 'string') {
 			let res = [''];
 			val.forEach(item => {
 				if (typeof item == 'object') {
 					res[res.length - 1] = util.inspect(res[res.length - 1]);
-					res.push(this.walk(item));
+					res.push(walk(item));
 					res.push('');
 				} else {
 					res[res.length - 1] += item;
 				}
 			});
 			res[res.length - 1] = util.inspect(res[res.length - 1]);
-			return this.trigger('string', this, res.join(' + '), block);
+			return trigger('string', context, res.join(' + '), block);
 		} else if (key == 'boolean') {
-			return this.trigger('boolean', this, text, block);
+			return trigger('boolean', context, text, block);
 		} else if (key == 'color') {
-			return this.trigger('color', this, text, block);
+			return trigger('color', context, text, block);
 		} else if (key == 'number') {
-			return this.trigger('number', this, text, block);
+			return trigger('number', context, text, block);
 		} else if (key == 'regex') {
-			return this.trigger('regex', this, text, block);
+			return trigger('regex', context, text, block);
 		} else if (key == 'empty') {
 			return '';
 		} else throw new Error(`Unhandled token "${key}" while converting the script.`);
 	}
-	run(tokens) {
-		for (const plugin of Object.values(this.plugins)) {
-			const handler = plugin.handler('init');
-			if (handler !== undefined) handler(this);
+	function directive(name, ...args) {
+		for (let i = stack.length - 1; i >= 0; --i) {
+			const res = stack[i].directive(name);
+			if (res !== undefined) return res(...args);
 		}
-		tokens.forEach(token => this.write(this.walk(token, true)));
-		while (this.stack.length) {
-			const handler = this.stack.pop().handler('stop');
-			if (handler !== undefined) handler(this);
-		}
-		for (const plugin of Object.values(this.plugins)) {
-			const handler = plugin.handler('exit');
-			if (handler !== undefined) handler(this);
-		}
+		throw new Error(`The directive "${name}" could not be found in context scope.`);
 	}
-	reset() {
-		this.text = '';
-		this.stack.length = 0;
-		this.data = {};
-		this.identifier = 0;
-	}
-	eval(text) {
-		this.reset();
-		const tokens = parse(text);
-		this.run(tokens);
-		return this.text;
+	function trigger(name, ...data) {
+		for (let i = stack.length - 1; i >= 0; --i) {
+			const res = stack[i].handler(name);
+			if (res !== undefined) return res(...data);
+		}
+		throw new Error(`The handler "${name}" could not be found in context scope.`);
 	}
 }
 
 module.exports = {
-	Script, Plugin, parse
+	Plugin, parse, runFile, runString
 };
